@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -m pip list)",
+      "Bash(\"C:/Program Files/PyManager/python.exe\" -c \"import torch, transformers, soundfile; print\\('ok', torch.__version__, transformers.__version__\\)\")",
+      "Bash(\"C:/msys64/ucrt64/bin/python.exe\" -c \"import torch, transformers, soundfile; print\\('ok', torch.__version__, transformers.__version__\\)\")",
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -m pip install --user --quiet torch --index-url https://download.pytorch.org/whl/cpu)",
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -m pip install --user --quiet torchaudio --index-url https://download.pytorch.org/whl/cpu transformers soundfile scikit-learn PyYAML pandas numpy scipy tqdm)",
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -m pip install --user --quiet torchaudio --index-url https://download.pytorch.org/whl/cpu)",
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -m pip install --user --quiet transformers soundfile scikit-learn PyYAML pandas numpy scipy tqdm)",
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -c \"import torch, torchaudio, transformers, soundfile, sklearn, yaml, pandas, numpy, scipy; print\\('torch', torch.__version__\\); print\\('torchaudio', torchaudio.__version__\\); print\\('transformers', transformers.__version__\\); print\\('soundfile', soundfile.__version__\\); print\\('sklearn', sklearn.__version__\\)\")",
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -m tests.test_smoke)",
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -X utf8 -m tests.test_smoke)",
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -X utf8 -m src.train --help)",
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -X utf8 -m src.evaluate --help)",
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -X utf8 run_experiments.py --help)",
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -X utf8 app.py --help)",
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -c \"import gradio; print\\('gradio', gradio.__version__\\)\")",
+      "Bash(\"C:/Users/Emir/AppData/Local/Programs/Python/Python312/python.exe\" -c \"from transformers import WavLMModel, Wav2Vec2Model; print\\('has _get_feat_extract_output_lengths on WavLM:', hasattr\\(WavLMModel, '_get_feat_extract_output_lengths'\\)\\); print\\('has _get_feat_extract_output_lengths on Wav2Vec2:', hasattr\\(Wav2Vec2Model, '_get_feat_extract_output_lengths'\\)\\)\")"
+    ]
+  }
+}

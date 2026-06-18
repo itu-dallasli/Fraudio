@@ -1,0 +1,54 @@
+# WavLM Base+ configuration for ASVspoof 2019 LA spoof detection.
+experiment_name: wavlm_base_plus
+seed: 42
+
+model:
+  encoder_name: microsoft/wavlm-base-plus
+  hidden_size: 768
+  proj_dim: 256
+  num_classes: 2
+  dropout: 0.3
+  freeze_encoder: false        # if true → frozen mode (head only)
+  unfreeze_last_n_layers: 2    # used when freeze_encoder is false
+
+data:
+  dataset_root: /content/LA    # path to ASVspoof2019 LA root (must contain ASVspoof2019_LA_*)
+  sample_rate: 16000
+  duration_seconds: 4.0
+  trim_silence: false
+  normalize_waveform: true
+  max_train_samples: null      # set to int for quick mode
+  max_dev_samples: null
+  max_eval_samples: null
+  num_workers: 2
+
+augmentation:
+  enabled: true
+  gaussian_noise_prob: 0.5
+  gaussian_noise_std: 0.005
+  random_gain_prob: 0.5
+  gain_db_range: [-6.0, 6.0]
+  time_shift_prob: 0.5
+  time_shift_max_ratio: 0.1
+  reverb_prob: 0.0             # cheap reverb (impulse not bundled); leave off by default
+
+training:
+  batch_size: 16
+  grad_accum_steps: 1
+  epochs: 3
+  encoder_lr: 1.0e-5
+  head_lr: 1.0e-4
+  weight_decay: 1.0e-4
+  warmup_ratio: 0.05
+  grad_clip: 1.0
+  mixed_precision: true
+  class_weighting: balanced    # one of: none, balanced, sqrt
+  use_balanced_sampler: false
+  log_every: 25
+  save_dir: checkpoints/wavlm
+  output_dir: outputs/wavlm
+
+inference:
+  uncertainty_margin: 0.10     # |spoof_prob - 0.5| < margin → uncertain
+  min_confidence: 0.55
+  disagreement_margin: 0.30    # diff between two models triggers uncertain

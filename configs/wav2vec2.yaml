@@ -1,0 +1,54 @@
+# Wav2Vec2 Base configuration for ASVspoof 2019 LA spoof detection.
+experiment_name: wav2vec2_base
+seed: 42
+
+model:
+  encoder_name: facebook/wav2vec2-base
+  hidden_size: 768
+  proj_dim: 256
+  num_classes: 2
+  dropout: 0.3
+  freeze_encoder: false
+  unfreeze_last_n_layers: 2
+
+data:
+  dataset_root: /content/LA
+  sample_rate: 16000
+  duration_seconds: 4.0
+  trim_silence: false
+  normalize_waveform: true
+  max_train_samples: null
+  max_dev_samples: null
+  max_eval_samples: null
+  num_workers: 2
+
+augmentation:
+  enabled: true
+  gaussian_noise_prob: 0.5
+  gaussian_noise_std: 0.005
+  random_gain_prob: 0.5
+  gain_db_range: [-6.0, 6.0]
+  time_shift_prob: 0.5
+  time_shift_max_ratio: 0.1
+  reverb_prob: 0.0
+
+training:
+  batch_size: 16
+  grad_accum_steps: 1
+  epochs: 3
+  encoder_lr: 1.0e-5
+  head_lr: 1.0e-4
+  weight_decay: 1.0e-4
+  warmup_ratio: 0.05
+  grad_clip: 1.0
+  mixed_precision: true
+  class_weighting: balanced
+  use_balanced_sampler: false
+  log_every: 25
+  save_dir: checkpoints/wav2vec2
+  output_dir: outputs/wav2vec2
+
+inference:
+  uncertainty_margin: 0.10
+  min_confidence: 0.55
+  disagreement_margin: 0.30
