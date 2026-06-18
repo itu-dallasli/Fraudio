@@ -9,7 +9,7 @@ model:
   num_classes: 2
   dropout: 0.3
   freeze_encoder: false
-  unfreeze_last_n_layers: 2
+  unfreeze_last_n_layers: 4
 
 data:
   source: huggingface
@@ -37,17 +37,17 @@ augmentation:
 training:
   batch_size: 16
   grad_accum_steps: 1
-  epochs: 3
-  encoder_lr: 1.0e-5
-  head_lr: 1.0e-4
+  epochs: 8
+  encoder_lr: 2.0e-5
+  head_lr: 5.0e-4
   weight_decay: 1.0e-4
-  warmup_ratio: 0.05
+  warmup_ratio: 0.03
   grad_clip: 1.0
   mixed_precision: true
-  class_weighting: balanced
-  use_balanced_sampler: false
-  streaming_steps_per_epoch: 1500
-  log_every: 25
+  class_weighting: none
+  use_balanced_sampler: true
+  streaming_steps_per_epoch: 2000
+  log_every: 50
   save_dir: checkpoints/wav2vec2_hf
   output_dir: outputs/wav2vec2_hf
 

@@ -127,6 +127,19 @@ def evaluate_loader(model, loader, device) -> dict:
     metrics = classification_metrics(spoof_scores, labels)
     eer, _ = equal_error_rate(spoof_scores, labels)
     metrics["eer"] = eer
+    # Class-collapse detector: if ≥98% of dev predictions land in one class while EER
+    # is roughly random, the model is shortcutting on the majority class. Warn loudly so
+    # the user can stop and re-check sampler/loss/learning-rate settings.
+    preds = (spoof_scores >= 0.5).astype(int)
+    n = len(preds)
+    spoof_frac = float((preds == 1).sum()) / max(1, n)
+    metrics["dev_pred_spoof_frac"] = spoof_frac
+    if n > 0 and (spoof_frac >= 0.98 or spoof_frac <= 0.02) and (eer > 0.40 or np.isnan(eer)):
+        LOG.warning(
+            f"[class-collapse] dev predictions are {spoof_frac*100:.1f}% spoof while EER={eer:.3f}. "
+            f"Model is shortcutting on the majority class. "
+            f"Try use_balanced_sampler=true, higher head_lr, more unfrozen layers, or more epochs."
+        )
     return {
         "logits": logits,
         "labels": labels,

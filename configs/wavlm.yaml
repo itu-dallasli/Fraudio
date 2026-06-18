@@ -9,7 +9,7 @@ model:
   num_classes: 2
   dropout: 0.3
   freeze_encoder: false        # if true → frozen mode (head only)
-  unfreeze_last_n_layers: 2    # used when freeze_encoder is false
+  unfreeze_last_n_layers: 4    # used when freeze_encoder is false
 
 data:
   dataset_root: /content/LA    # path to ASVspoof2019 LA root (must contain ASVspoof2019_LA_*)
@@ -35,16 +35,18 @@ augmentation:
 training:
   batch_size: 16
   grad_accum_steps: 1
-  epochs: 3
-  encoder_lr: 1.0e-5
-  head_lr: 1.0e-4
+  epochs: 8
+  encoder_lr: 2.0e-5
+  head_lr: 5.0e-4
   weight_decay: 1.0e-4
-  warmup_ratio: 0.05
+  warmup_ratio: 0.03
   grad_clip: 1.0
   mixed_precision: true
-  class_weighting: balanced    # one of: none, balanced, sqrt
-  use_balanced_sampler: false
-  log_every: 25
+  # Balanced sampler is the strongest defence against class collapse on ASVspoof's
+  # ~1:9 bonafide:spoof split. Keep class weighting off when sampler is on.
+  class_weighting: none        # one of: none, balanced, sqrt
+  use_balanced_sampler: true
+  log_every: 50
   save_dir: checkpoints/wavlm
   output_dir: outputs/wavlm
 
