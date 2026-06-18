@@ -34,10 +34,33 @@ Colab T4 üzerinde mixed precision ile çalışır. Yerel kurulumda PyTorch'u CU
 
 ## Dataset
 
-ASVspoof 2019 LA paketi resmi sayfasından indirilir:
-<https://datashare.ed.ac.uk/handle/10283/3336>
+İki kaynak desteklenir; config içinde `data.source` ile seçilir.
 
-İndirip aşağıdaki yapıya çıkarın:
+### Seçenek A — Hugging Face (indirme gerekmiyor) ⭐
+
+`Bisher/ASVspoof_2019_LA` deposu `datasets` kütüphanesi tarafından otomatik çekilir. Manuel unpacking yok. İki mod:
+
+* `data.streaming: false` (varsayılan) → HF cache'e ~7.5 GB parquet iner, sonraki çalıştırmalar offline.
+* `data.streaming: true` → diske kalıcı dosya yazılmaz, parquet shard'ları akıtılır. `len()` ve balanced sampler bu modda çalışmaz; class-weighted CE kullanılır ve epoch başına adım sayısı `training.streaming_steps_per_epoch` ile kontrol edilir.
+
+Hazır configler:
+
+```bash
+python -m src.train --config configs/wavlm_hf.yaml
+python -m src.train --config configs/wav2vec2_hf.yaml
+python -m src.evaluate \
+  --wavlm-checkpoint    checkpoints/wavlm_hf/best.pt \
+  --wav2vec2-checkpoint checkpoints/wav2vec2_hf/best.pt \
+  --fusion
+```
+
+İlk çağrıda HF Hub'a erişim gerekir (depo public, login gerekmez). `--dataset_root` bu modda göz ardı edilir.
+
+HF → yerel partition eşlemesi: `train→train`, `validation→dev`, `test→eval`. Streaming modunda eval seti `take(N)` ile sınırlanabilir.
+
+### Seçenek B — Yerel ASVspoof 2019 LA paketi
+
+Resmi sayfa: <https://datashare.ed.ac.uk/handle/10283/3336>. İndirip aşağıdaki yapıya çıkarın:
 
 ```
 LA/
@@ -50,7 +73,7 @@ LA/
       ASVspoof2019.LA.cm.eval.trl.txt
 ```
 
-`configs/*.yaml` içinde `data.dataset_root` değerini bu `LA/` klasörünü gösterecek şekilde değiştirin veya CLI ile `--dataset_root /path/to/LA` geçin.
+`configs/wavlm.yaml` / `configs/wav2vec2.yaml` içindeki `data.dataset_root` değerini bu `LA/` klasörüne ayarlayın ya da CLI'dan `--dataset_root /path/to/LA` geçin.
 
 Hızlı denemeler için `--max_samples` veya `--quick` bayrağı her partition'dan sınıf-dengesinde subsample alır.
 

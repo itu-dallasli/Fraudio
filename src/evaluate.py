@@ -91,14 +91,25 @@ def _build_loaders(cfg: dict, dataset_root_override: str | None, seed: int):
     if dataset_root_override:
         cfg_data["dataset_root"] = dataset_root_override
     cfg_aug = cfg.get("augmentation", {})
-    dev_items = load_items_for_partition(
-        cfg_data["dataset_root"], "dev", cfg_data.get("max_dev_samples"), seed
-    )
-    eval_items = load_items_for_partition(
-        cfg_data["dataset_root"], "eval", cfg_data.get("max_eval_samples"), seed
-    )
-    dev_ds = build_dataset(dev_items, cfg_data, cfg_aug, partition="dev", seed=seed)
-    eval_ds = build_dataset(eval_items, cfg_data, cfg_aug, partition="eval", seed=seed)
+    source = (cfg_data.get("source") or "file").lower()
+
+    if source in ("file", "asvspoof", "asvspoof_la"):
+        dev_items = load_items_for_partition(
+            cfg_data["dataset_root"], "dev", cfg_data.get("max_dev_samples"), seed
+        )
+        eval_items = load_items_for_partition(
+            cfg_data["dataset_root"], "eval", cfg_data.get("max_eval_samples"), seed
+        )
+        dev_ds = build_dataset(dev_items, cfg_data, cfg_aug, partition="dev", seed=seed)
+        eval_ds = build_dataset(eval_items, cfg_data, cfg_aug, partition="eval", seed=seed)
+    elif source in ("huggingface", "hf"):
+        from .data.hf_loader import build_hf_dataset
+        dev_ds = build_hf_dataset(cfg_data, cfg_aug, partition="dev", seed=seed)
+        eval_ds = build_hf_dataset(cfg_data, cfg_aug, partition="eval", seed=seed)
+        dev_items = eval_items = None
+    else:
+        raise ValueError(f"Unknown data.source: {source}")
+
     loader_kwargs = dict(
         batch_size=cfg["training"]["batch_size"],
         shuffle=False,

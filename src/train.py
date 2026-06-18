@@ -25,6 +25,34 @@ from .data.dataset import (
 from .metrics import equal_error_rate, classification_metrics
 from .models.ssl_classifier import build_model_from_cfg
 from .utils import get_logger, load_yaml, save_json, select_device, set_seed
+from torch.utils.data import WeightedRandomSampler
+
+
+def _build_partition(cfg_data: dict, cfg_aug: dict, partition: str, seed: int):
+    """Return (dataset, labels_list_or_None) for either file or HF source."""
+    source = (cfg_data.get("source") or "file").lower()
+    if source in ("file", "asvspoof", "asvspoof_la"):
+        items = load_items_for_partition(
+            cfg_data["dataset_root"], partition,
+            cfg_data.get({"train": "max_train_samples", "dev": "max_dev_samples", "eval": "max_eval_samples"}[partition]),
+            seed,
+        )
+        ds = build_dataset(items, cfg_data, cfg_aug, partition=partition, seed=seed)
+        return ds, [x.label for x in items]
+    elif source in ("huggingface", "hf"):
+        from .data.hf_loader import HFASVspoofDataset, build_hf_dataset
+        ds = build_hf_dataset(cfg_data, cfg_aug, partition=partition, seed=seed)
+        labels = ds.labels if isinstance(ds, HFASVspoofDataset) else None
+        return ds, labels
+    else:
+        raise ValueError(f"Unknown data.source: {source}")
+
+
+def _balanced_sampler_from_labels(labels: list[int]) -> WeightedRandomSampler:
+    n_bona = sum(1 for x in labels if x == 0) or 1
+    n_spoof = sum(1 for x in labels if x == 1) or 1
+    weights = [1.0 / n_bona if x == 0 else 1.0 / n_spoof for x in labels]
+    return WeightedRandomSampler(weights, num_samples=len(labels), replacement=True)
 
 
 LOG = get_logger("train")
@@ -34,11 +62,11 @@ LOG = get_logger("train")
 # helpers
 # ---------------------------------------------------------------------- #
 
-def _class_weights(items, mode: str) -> torch.Tensor | None:
-    if mode in (None, "none"):
+def _class_weights(labels, mode: str) -> torch.Tensor | None:
+    if mode in (None, "none") or labels is None:
         return None
-    n_bona = sum(1 for x in items if x.label == 0) or 1
-    n_spoof = sum(1 for x in items if x.label == 1) or 1
+    n_bona = sum(1 for x in labels if x == 0) or 1
+    n_spoof = sum(1 for x in labels if x == 1) or 1
     total = n_bona + n_spoof
     if mode == "balanced":
         w0 = total / (2.0 * n_bona)
@@ -123,23 +151,26 @@ def train(cfg: dict, dataset_root_override: str | None = None) -> dict:
     cfg_aug = cfg.get("augmentation", {})
     cfg_train = cfg["training"]
 
-    train_items = load_items_for_partition(
-        cfg_data["dataset_root"], "train", cfg_data.get("max_train_samples"), cfg["seed"]
-    )
-    dev_items = load_items_for_partition(
-        cfg_data["dataset_root"], "dev", cfg_data.get("max_dev_samples"), cfg["seed"]
-    )
-    LOG.info(f"Train: {len(train_items)} | Dev: {len(dev_items)}")
+    train_ds, train_labels = _build_partition(cfg_data, cfg_aug, "train", cfg["seed"])
+    dev_ds, _dev_labels = _build_partition(cfg_data, cfg_aug, "dev", cfg["seed"])
+    is_iterable_train = isinstance(train_ds, torch.utils.data.IterableDataset)
+    if not is_iterable_train:
+        LOG.info(f"Train: {len(train_ds)} | Dev: {len(dev_ds)}")
+    else:
+        LOG.info("Train: streaming (HF) | Dev: streaming (HF)")
 
-    train_ds = build_dataset(train_items, cfg_data, cfg_aug, partition="train", seed=cfg["seed"])
-    dev_ds = build_dataset(dev_items, cfg_data, cfg_aug, partition="dev", seed=cfg["seed"])
+    sampler = None
+    if cfg_train.get("use_balanced_sampler", False):
+        if is_iterable_train or train_labels is None:
+            LOG.warning("Balanced sampler unavailable in streaming/HF mode; using class-weighted CE instead.")
+        else:
+            sampler = _balanced_sampler_from_labels(train_labels)
 
-    sampler = make_balanced_sampler(train_items) if cfg_train.get("use_balanced_sampler", False) else None
     train_loader = DataLoader(
         train_ds,
         batch_size=cfg_train["batch_size"],
         sampler=sampler,
-        shuffle=sampler is None,
+        shuffle=(sampler is None and not is_iterable_train),
         num_workers=cfg_data.get("num_workers", 2),
         pin_memory=device.type == "cuda",
         collate_fn=collate_batch,
@@ -156,10 +187,14 @@ def train(cfg: dict, dataset_root_override: str | None = None) -> dict:
 
     model = build_model_from_cfg(cfg["model"]).to(device)
     optimiser = _build_optimiser(model, cfg_train)
-    total_steps = max(1, len(train_loader) * cfg_train["epochs"] // max(1, cfg_train.get("grad_accum_steps", 1)))
+    if is_iterable_train:
+        steps_per_epoch = max(1, cfg_train.get("streaming_steps_per_epoch", 500))
+    else:
+        steps_per_epoch = max(1, len(train_loader))
+    total_steps = max(1, steps_per_epoch * cfg_train["epochs"] // max(1, cfg_train.get("grad_accum_steps", 1)))
     scheduler = _build_scheduler(optimiser, total_steps, cfg_train.get("warmup_ratio", 0.05))
 
-    class_w = _class_weights(train_items, cfg_train.get("class_weighting", "balanced"))
+    class_w = _class_weights(train_labels, cfg_train.get("class_weighting", "balanced"))
     if class_w is not None:
         class_w = class_w.to(device)
         LOG.info(f"Class weights (bonafide, spoof) = {class_w.tolist()}")

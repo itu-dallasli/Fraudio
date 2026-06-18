@@ -1,0 +1,59 @@
+# WavLM Base+ — Hugging Face data source.
+# Uses `Bisher/ASVspoof_2019_LA` directly via `datasets.load_dataset`.
+# No manual download required; HF cache stores parquet shards.
+experiment_name: wavlm_base_plus_hf
+seed: 42
+
+model:
+  encoder_name: microsoft/wavlm-base-plus
+  hidden_size: 768
+  proj_dim: 256
+  num_classes: 2
+  dropout: 0.3
+  freeze_encoder: false
+  unfreeze_last_n_layers: 2
+
+data:
+  source: huggingface
+  hf_repo: Bisher/ASVspoof_2019_LA
+  streaming: false            # set true to avoid the ~7.5 GB cache (no len, no balanced sampler)
+  sample_rate: 16000
+  duration_seconds: 4.0
+  trim_silence: false
+  normalize_waveform: true
+  max_train_samples: null
+  max_dev_samples: null
+  max_eval_samples: null
+  num_workers: 2
+
+augmentation:
+  enabled: true
+  gaussian_noise_prob: 0.5
+  gaussian_noise_std: 0.005
+  random_gain_prob: 0.5
+  gain_db_range: [-6.0, 6.0]
+  time_shift_prob: 0.5
+  time_shift_max_ratio: 0.1
+  reverb_prob: 0.0
+
+training:
+  batch_size: 16
+  grad_accum_steps: 1
+  epochs: 3
+  encoder_lr: 1.0e-5
+  head_lr: 1.0e-4
+  weight_decay: 1.0e-4
+  warmup_ratio: 0.05
+  grad_clip: 1.0
+  mixed_precision: true
+  class_weighting: balanced
+  use_balanced_sampler: false
+  streaming_steps_per_epoch: 1500   # used only when data.streaming: true
+  log_every: 25
+  save_dir: checkpoints/wavlm_hf
+  output_dir: outputs/wavlm_hf
+
+inference:
+  uncertainty_margin: 0.10
+  min_confidence: 0.55
+  disagreement_margin: 0.30
