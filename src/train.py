@@ -211,7 +211,10 @@ def train(cfg: dict, dataset_root_override: str | None = None) -> dict:
     if class_w is not None:
         class_w = class_w.to(device)
         LOG.info(f"Class weights (bonafide, spoof) = {class_w.tolist()}")
-    loss_fn = torch.nn.CrossEntropyLoss(weight=class_w)
+    label_smoothing = float(cfg_train.get("label_smoothing", 0.0))
+    if label_smoothing > 0:
+        LOG.info(f"Using label smoothing = {label_smoothing}")
+    loss_fn = torch.nn.CrossEntropyLoss(weight=class_w, label_smoothing=label_smoothing)
 
     use_amp = bool(cfg_train.get("mixed_precision", True)) and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)

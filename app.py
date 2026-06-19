@@ -61,6 +61,7 @@ class SpoofPipeline:
         wavlm_ckpt: str,
         wav2vec2_ckpt: str,
         fusion: FusionBundle | None = None,
+        decision_threshold: float = 0.5,
         uncertainty_margin: float = 0.10,
         min_confidence: float = 0.55,
         disagreement_margin: float = 0.30,
@@ -70,6 +71,7 @@ class SpoofPipeline:
         self.wavlm, _ = self._load(wavlm_ckpt)
         self.w2v, _ = self._load(wav2vec2_ckpt)
         self.fusion = fusion or FusionBundle()
+        self.decision_threshold = decision_threshold
         self.uncertainty_margin = uncertainty_margin
         self.min_confidence = min_confidence
         self.disagreement_margin = disagreement_margin
@@ -137,25 +139,50 @@ class SpoofPipeline:
         return 0.5 * w_p + 0.5 * v_p
 
     def _decide(self, fused_score: float, w_p: float, v_p: float) -> tuple[str, float, str]:
-        # Confidence is distance from 0.5 mapped to [0, 1].
-        confidence = float(abs(fused_score - 0.5) * 2.0)
-        w_pred = w_p >= 0.5
-        v_pred = v_p >= 0.5
+        thr = self.decision_threshold
+        # Confidence is distance from the decision boundary, mapped to [0, 1].
+        confidence = float(min(1.0, abs(fused_score - thr) * 2.0))
+        w_pred = w_p >= thr
+        v_pred = v_p >= thr
         disagree = w_pred != v_pred
         score_diff = abs(w_p - v_p)
-        reason = ""
         if disagree and score_diff >= self.disagreement_margin:
             return "UNCERTAIN", confidence, "models disagree with margin"
-        if abs(fused_score - 0.5) < self.uncertainty_margin:
+        if abs(fused_score - thr) < self.uncertainty_margin:
             return "UNCERTAIN", confidence, "fusion score near decision boundary"
         if confidence < self.min_confidence:
             return "UNCERTAIN", confidence, "confidence below minimum threshold"
-        label = "SPOOF" if fused_score >= 0.5 else "BONAFIDE"
-        return label, confidence, reason or "high-confidence agreement"
+        label = "SPOOF" if fused_score >= thr else "BONAFIDE"
+        return label, confidence, "high-confidence agreement"
 
     # -------------------------- public API -------------------------- #
 
-    def analyse(self, audio: np.ndarray, sr: int) -> dict:
+    def analyse(
+        self,
+        audio: np.ndarray,
+        sr: int,
+        decision_threshold: float | None = None,
+        uncertainty_margin: float | None = None,
+    ) -> dict:
+        # Allow per-call overrides so the demo can dial thresholds live without
+        # rebuilding the pipeline.
+        if decision_threshold is not None:
+            saved_thr, self.decision_threshold = self.decision_threshold, float(decision_threshold)
+        else:
+            saved_thr = None
+        if uncertainty_margin is not None:
+            saved_unc, self.uncertainty_margin = self.uncertainty_margin, float(uncertainty_margin)
+        else:
+            saved_unc = None
+        try:
+            return self._analyse_impl(audio, sr)
+        finally:
+            if saved_thr is not None:
+                self.decision_threshold = saved_thr
+            if saved_unc is not None:
+                self.uncertainty_margin = saved_unc
+
+    def _analyse_impl(self, audio: np.ndarray, sr: int) -> dict:
         audio = self._preprocess(audio, sr)
         duration_s = audio.size / self.SAMPLE_RATE
 
@@ -254,7 +281,7 @@ def build_interface(pipeline: SpoofPipeline):
         fig.tight_layout()
         return fig
 
-    def _plot_windows(windows: list[dict] | None):
+    def _plot_windows(windows: list[dict] | None, thr: float):
         if not windows:
             return None
         fig, ax = plt.subplots(figsize=(7, 2.4))
@@ -262,7 +289,7 @@ def build_interface(pipeline: SpoofPipeline):
         ax.plot(t, [w["fusion_score"] for w in windows], "o-", label="fusion")
         ax.plot(t, [w["wavlm_spoof_prob"] for w in windows], "s--", alpha=0.6, label="WavLM")
         ax.plot(t, [w["wav2vec2_spoof_prob"] for w in windows], "^--", alpha=0.6, label="Wav2Vec2")
-        ax.axhline(0.5, color="k", linestyle=":", alpha=0.4)
+        ax.axhline(thr, color="k", linestyle=":", alpha=0.4, label=f"threshold={thr:.2f}")
         ax.set_xlabel("time (s)")
         ax.set_ylabel("spoof probability")
         ax.set_ylim(-0.02, 1.02)
@@ -271,7 +298,7 @@ def build_interface(pipeline: SpoofPipeline):
         fig.tight_layout()
         return fig
 
-    def infer(audio_tuple):
+    def infer(audio_tuple, decision_threshold, uncertainty_margin):
         if audio_tuple is None:
             return None, "No audio.", None
         sr, audio = audio_tuple
@@ -281,16 +308,20 @@ def build_interface(pipeline: SpoofPipeline):
         if audio.dtype.kind in {"i", "u"}:
             audio = audio.astype(np.float32) / np.iinfo(audio.dtype).max
 
-        result = pipeline.analyse(audio, sr)
+        result = pipeline.analyse(
+            audio, sr,
+            decision_threshold=decision_threshold,
+            uncertainty_margin=uncertainty_margin,
+        )
 
-        # Markdown summary.
-        agree = ((result["wavlm_spoof_prob"] >= 0.5) == (result["wav2vec2_spoof_prob"] >= 0.5))
+        thr = float(decision_threshold)
+        agree = ((result["wavlm_spoof_prob"] >= thr) == (result["wav2vec2_spoof_prob"] >= thr))
         agreement = "agree ✅" if agree else "disagree ⚠️"
         text = (
             f"### Final decision: **{result['decision']}**\n"
             f"- Final confidence: **{result['confidence']:.3f}**\n"
             f"- Fusion score (P spoof): **{result['fusion_score']:.3f}**  "
-            f"({result['fusion_method']})\n"
+            f"({result['fusion_method']}, threshold={thr:.2f})\n"
             f"- WavLM spoof probability: **{result['wavlm_spoof_prob']:.3f}**\n"
             f"- Wav2Vec2 spoof probability: **{result['wav2vec2_spoof_prob']:.3f}**\n"
             f"- Model agreement: **{agreement}**\n"
@@ -299,7 +330,7 @@ def build_interface(pipeline: SpoofPipeline):
             f"{DISCLAIMER}"
         )
         wf_fig = _plot_waveform(audio.astype(np.float32), sr)
-        win_fig = _plot_windows(result["windows"])
+        win_fig = _plot_windows(result["windows"], thr)
         return wf_fig, text, win_fig
 
     with gr.Blocks(title="Voice Spoof Detection (PoC)") as demo:
@@ -309,12 +340,27 @@ def build_interface(pipeline: SpoofPipeline):
         )
         with gr.Row():
             audio_in = gr.Audio(sources=["microphone", "upload"], type="numpy", label="Audio (mic/upload)")
+        with gr.Accordion("Decision controls (advanced)", open=False):
+            threshold_slider = gr.Slider(
+                minimum=0.30, maximum=0.95, step=0.01,
+                value=pipeline.decision_threshold,
+                label="Decision threshold (P spoof above this → SPOOF)",
+            )
+            margin_slider = gr.Slider(
+                minimum=0.00, maximum=0.30, step=0.01,
+                value=pipeline.uncertainty_margin,
+                label="Uncertainty margin (|fused − threshold| < margin → UNCERTAIN)",
+            )
         run_btn = gr.Button("Analyse", variant="primary")
         with gr.Row():
             waveform_plot = gr.Plot(label="Waveform")
         result_md = gr.Markdown()
         windows_plot = gr.Plot(label="Sliding-window analysis (if audio > 4 s)")
-        run_btn.click(infer, inputs=audio_in, outputs=[waveform_plot, result_md, windows_plot])
+        run_btn.click(
+            infer,
+            inputs=[audio_in, threshold_slider, margin_slider],
+            outputs=[waveform_plot, result_md, windows_plot],
+        )
     return demo
 
 
@@ -323,12 +369,23 @@ def main():
     p.add_argument("--wavlm-checkpoint", required=True)
     p.add_argument("--wav2vec2-checkpoint", required=True)
     p.add_argument("--fusion-bundle", default=None)
+    p.add_argument("--decision-threshold", type=float, default=0.65,
+                   help="Initial decision threshold. The UI slider can override per-call.")
+    p.add_argument("--uncertainty-margin", type=float, default=0.12)
+    p.add_argument("--min-confidence", type=float, default=0.45)
+    p.add_argument("--disagreement-margin", type=float, default=0.30)
     p.add_argument("--share", action="store_true")
     p.add_argument("--server-name", default=None)
     args = p.parse_args()
 
     fusion = FusionBundle.from_json(args.fusion_bundle) if args.fusion_bundle else None
-    pipe = SpoofPipeline(args.wavlm_checkpoint, args.wav2vec2_checkpoint, fusion=fusion)
+    pipe = SpoofPipeline(
+        args.wavlm_checkpoint, args.wav2vec2_checkpoint, fusion=fusion,
+        decision_threshold=args.decision_threshold,
+        uncertainty_margin=args.uncertainty_margin,
+        min_confidence=args.min_confidence,
+        disagreement_margin=args.disagreement_margin,
+    )
     demo = build_interface(pipe)
     demo.launch(share=args.share, server_name=args.server_name)
 

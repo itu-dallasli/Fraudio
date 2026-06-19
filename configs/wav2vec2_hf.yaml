@@ -32,26 +32,32 @@ augmentation:
   gain_db_range: [-6.0, 6.0]
   time_shift_prob: 0.5
   time_shift_max_ratio: 0.1
-  reverb_prob: 0.0
+  reverb_prob: 0.2
+  bandpass_prob: 0.35
+  bandpass_range_hz: [200.0, 400.0, 3000.0, 3800.0]
+  mulaw_prob: 0.25
+  mulaw_bits_choices: [8, 8, 10, 12]
 
 training:
   batch_size: 16
   grad_accum_steps: 1
-  epochs: 8
+  epochs: 4
   encoder_lr: 2.0e-5
   head_lr: 5.0e-4
   weight_decay: 1.0e-4
-  warmup_ratio: 0.03
+  warmup_ratio: 0.05
   grad_clip: 1.0
   mixed_precision: true
   class_weighting: none
   use_balanced_sampler: true
+  label_smoothing: 0.10
   streaming_steps_per_epoch: 2000
   log_every: 50
   save_dir: checkpoints/wav2vec2_hf
   output_dir: outputs/wav2vec2_hf
 
 inference:
-  uncertainty_margin: 0.10
-  min_confidence: 0.55
+  decision_threshold: 0.65
+  uncertainty_margin: 0.12
+  min_confidence: 0.45
   disagreement_margin: 0.30

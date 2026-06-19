@@ -177,6 +177,10 @@ def build_dataset(
             time_shift_prob=cfg_aug.get("time_shift_prob", 0.5),
             time_shift_max_ratio=cfg_aug.get("time_shift_max_ratio", 0.1),
             reverb_prob=cfg_aug.get("reverb_prob", 0.0),
+            bandpass_prob=cfg_aug.get("bandpass_prob", 0.0),
+            bandpass_range_hz=tuple(cfg_aug.get("bandpass_range_hz", (200.0, 400.0, 3000.0, 3800.0))),
+            mulaw_prob=cfg_aug.get("mulaw_prob", 0.0),
+            mulaw_bits_choices=tuple(cfg_aug.get("mulaw_bits_choices", (8, 8, 10, 12))),
             rng=np.random.default_rng(seed),
         )
     return ASVspoofDataset(
