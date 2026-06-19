@@ -26,6 +26,80 @@ from src.models.calibration import TemperatureScaler
 from src.models.ssl_classifier import build_model_from_cfg
 
 
+# ----------------------------- example clip provisioning ----------------------------- #
+
+def ensure_example_clips(
+    out_dir: str = "examples",
+    hf_repo: str = "Bisher/ASVspoof_2019_LA",
+    hf_split: str = "test",
+    max_probe: int = 200,
+) -> dict[str, Optional[str]]:
+    """Make sure one bonafide and one spoof example exist on disk.
+
+    On first run, streams the HF dataset and writes the first matching
+    sample of each class to `out_dir/bonafide.flac` and `out_dir/spoof.flac`.
+    Subsequent runs are no-ops. If HF is unreachable or the package is
+    missing, returns None for any clip we couldn't produce — Gradio just
+    skips that example.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    paths = {
+        "bonafide": os.path.join(out_dir, "bonafide.flac"),
+        "spoof":    os.path.join(out_dir, "spoof.flac"),
+    }
+    missing = {k: p for k, p in paths.items() if not os.path.exists(p)}
+    if not missing:
+        return paths
+
+    try:
+        from datasets import Audio, load_dataset
+    except ImportError:
+        print("[examples] `datasets` not available; skipping auto-fetch.")
+        return {k: (p if os.path.exists(p) else None) for k, p in paths.items()}
+
+    try:
+        ds = load_dataset(hf_repo, split=hf_split, streaming=True)
+        ds = ds.cast_column("audio", Audio(sampling_rate=16000))
+    except Exception as e:
+        print(f"[examples] HF stream failed ({e}); skipping auto-fetch.")
+        return {k: (p if os.path.exists(p) else None) for k, p in paths.items()}
+
+    found: dict[str, dict] = {}
+    target_int = {0: "bonafide", 1: "spoof"}
+    target_str = {"bonafide": "bonafide", "spoof": "spoof"}
+    for i, row in enumerate(ds):
+        if len(found) == len(missing):
+            break
+        if i >= max_probe:
+            break
+        key = row.get("key")
+        if isinstance(key, str):
+            label = target_str.get(key.lower())
+        elif isinstance(key, int):
+            label = target_int.get(int(key))
+        else:
+            label = None
+        if label and label in missing and label not in found:
+            found[label] = row
+
+    for label, row in found.items():
+        aud = row["audio"]
+        if isinstance(aud, dict):
+            arr, sr = aud["array"], int(aud["sampling_rate"])
+        else:
+            s = aud.get_all_samples()
+            arr, sr = s.data, int(s.sample_rate)
+        if hasattr(arr, "numpy"):
+            arr = arr.numpy()
+        arr = np.asarray(arr, dtype=np.float32)
+        if arr.ndim == 2:
+            arr = arr.mean(axis=0)
+        sf.write(missing[label], arr, sr, format="FLAC")
+        print(f"[examples] wrote {missing[label]} ({arr.shape[0]/sr:.2f}s, sr={sr})")
+
+    return {k: (p if os.path.exists(p) else None) for k, p in paths.items()}
+
+
 # ----------------------------- inference engine ----------------------------- #
 
 @dataclass
@@ -260,7 +334,7 @@ class SpoofPipeline:
 
 # ----------------------------- Gradio UI ----------------------------- #
 
-def build_interface(pipeline: SpoofPipeline):
+def build_interface(pipeline: SpoofPipeline, example_paths: dict[str, Optional[str]] | None = None):
     import gradio as gr
     import matplotlib
 
@@ -352,6 +426,28 @@ def build_interface(pipeline: SpoofPipeline):
                 label="Uncertainty margin (|fused − threshold| < margin → UNCERTAIN)",
             )
         run_btn = gr.Button("Analyse", variant="primary")
+
+        # Pre-bundled examples (one bonafide, one spoof from ASVspoof19 LA test).
+        ex_rows = []
+        if example_paths:
+            for label_name in ("bonafide", "spoof"):
+                p = example_paths.get(label_name)
+                if p and os.path.exists(p):
+                    ex_rows.append([p, pipeline.decision_threshold, pipeline.uncertainty_margin])
+        if ex_rows:
+            gr.Markdown(
+                "### Hazır örnekler\n"
+                "Aşağıdaki iki klip ASVspoof 2019 LA **test split**'inden çekildi — "
+                "model bu örnekleri eğitimde görmedi.  \n"
+                "Tıkla → yukarıdaki **Analyse** butonuna bas. Sonra mikrofon sekmesinden kendi sesini kaydet ve karşılaştır."
+            )
+            gr.Examples(
+                examples=ex_rows,
+                inputs=[audio_in, threshold_slider, margin_slider],
+                label="bonafide.flac ↔ spoof.flac",
+                cache_examples=False,
+            )
+
         with gr.Row():
             waveform_plot = gr.Plot(label="Waveform")
         result_md = gr.Markdown()
@@ -376,6 +472,12 @@ def main():
     p.add_argument("--disagreement-margin", type=float, default=0.30)
     p.add_argument("--share", action="store_true")
     p.add_argument("--server-name", default=None)
+    p.add_argument("--examples-dir", default="examples",
+                   help="Local folder for the bonafide.flac / spoof.flac example clips.")
+    p.add_argument("--examples-hf-repo", default="Bisher/ASVspoof_2019_LA",
+                   help="HF dataset to pull example clips from on first launch.")
+    p.add_argument("--no-fetch-examples", action="store_true",
+                   help="Skip auto-fetching example clips; only use what's already on disk.")
     args = p.parse_args()
 
     fusion = FusionBundle.from_json(args.fusion_bundle) if args.fusion_bundle else None
@@ -386,7 +488,16 @@ def main():
         min_confidence=args.min_confidence,
         disagreement_margin=args.disagreement_margin,
     )
-    demo = build_interface(pipe)
+    if args.no_fetch_examples:
+        examples = {
+            "bonafide": (os.path.join(args.examples_dir, "bonafide.flac")
+                         if os.path.exists(os.path.join(args.examples_dir, "bonafide.flac")) else None),
+            "spoof":    (os.path.join(args.examples_dir, "spoof.flac")
+                         if os.path.exists(os.path.join(args.examples_dir, "spoof.flac")) else None),
+        }
+    else:
+        examples = ensure_example_clips(out_dir=args.examples_dir, hf_repo=args.examples_hf_repo)
+    demo = build_interface(pipe, example_paths=examples)
     demo.launch(share=args.share, server_name=args.server_name)
 
 

@@ -9,6 +9,7 @@ venv/
 # Project artefacts
 checkpoints/
 outputs/
+examples/                  # auto-fetched demo clips
 .hf_cache/
 .cache/
 
