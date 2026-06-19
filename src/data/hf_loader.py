@@ -51,22 +51,39 @@ def _normalise_label(key) -> int:
 
 
 def _decode_audio(audio_field, target_sr: int) -> np.ndarray:
-    """HF `Audio` feature is decoded to {'array': np.ndarray, 'sampling_rate': int}."""
+    """HF `Audio` feature decoder.
+
+    Old datasets API returns {'array': np.ndarray (T,), 'sampling_rate': int}.
+    New (>=3.5) returns an AudioDecoder whose .get_all_samples().data is a
+    torch tensor with shape (num_channels, num_samples). The channel axis
+    differs from soundfile's (T, C) convention, so we collapse channels
+    explicitly per-source instead of guessing with axis=-1.
+    """
     if isinstance(audio_field, dict):
         arr = np.asarray(audio_field.get("array"))
         sr = int(audio_field.get("sampling_rate", target_sr))
-    elif hasattr(audio_field, "get_all_samples"):  # newer datasets returns AudioDecoder
+        if arr.ndim > 1:
+            # HF dict 'array' is typically (T,) for mono; if multichannel it follows
+            # soundfile's (T, C) layout.
+            arr = arr.mean(axis=-1)
+    elif hasattr(audio_field, "get_all_samples"):  # AudioDecoder
         samples = audio_field.get_all_samples()
-        arr = np.asarray(samples.data).astype(np.float32)
+        data = samples.data
+        if hasattr(data, "numpy"):
+            data = data.numpy()
+        arr = np.asarray(data, dtype=np.float32)
+        if arr.ndim == 2:
+            # TorchCodec returns (C, T); average across channels (axis 0), NOT axis -1.
+            arr = arr.mean(axis=0)
         sr = int(samples.sample_rate)
     else:
         # Bytes fallback — read via soundfile.
         import soundfile as sf
         data, sr = sf.read(io.BytesIO(audio_field["bytes"]), dtype="float32", always_2d=False)
         arr = np.asarray(data)
-    if arr.ndim > 1:
-        arr = arr.mean(axis=-1)
-    arr = arr.astype(np.float32, copy=False)
+        if arr.ndim > 1:
+            arr = arr.mean(axis=-1)  # soundfile uses (T, C)
+    arr = np.ascontiguousarray(arr.astype(np.float32, copy=False))
     if sr != target_sr:
         arr = _resample(arr, sr, target_sr)
     return arr
